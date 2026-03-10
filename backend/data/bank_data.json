@@ -1,0 +1,80 @@
+{
+    "users": [
+        {
+            "id": 1,
+            "name": "Yash Londhe",
+            "card_number": "1111222233334444",
+            "pin": "1234",
+            "account": {
+                "account_number": "SB1001",
+                "balance": 24560,
+                "type": "Savings"
+            },
+            "transactions": [
+                {
+                    "amount": 500,
+                    "type": "debit",
+                    "description": "Grocery",
+                    "date": "2026-03-10"
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "name": "Alice Smith",
+            "card_number": "5555666677778888",
+            "pin": "5678",
+            "account": {
+                "account_number": "SB1002",
+                "balance": 15000,
+                "type": "Current"
+            },
+            "transactions": [
+                {
+                    "amount": 1000,
+                    "type": "credit",
+                    "description": "Salary",
+                    "date": "2026-03-01"
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "name": "Bob Johnson",
+            "card_number": "9999000011112222",
+            "pin": "9012",
+            "account": {
+                "account_number": "SB1003",
+                "balance": 5200,
+                "type": "Savings"
+            },
+            "transactions": [
+                {
+                    "amount": 200,
+                    "type": "debit",
+                    "description": "ATM Withdrawal",
+                    "date": "2026-03-05"
+                }
+            ]
+        },
+        {
+            "id": 4,
+            "name": "Eve Davis",
+            "card_number": "3333444455556666",
+            "pin": "3456",
+            "account": {
+                "account_number": "SB1004",
+                "balance": 89000,
+                "type": "Savings"
+            },
+            "transactions": [
+                {
+                    "amount": 5000,
+                    "type": "credit",
+                    "description": "Transfer",
+                    "date": "2026-03-08"
+                }
+            ]
+        }
+    ]
+}
