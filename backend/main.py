@@ -5,6 +5,8 @@ from services import banking_service, ai_service
 
 app = FastAPI(title="Banking Kiosk API")
 
+sessions = {}
+
 # Enable CORS for the frontend (Next.js)
 app.add_middleware(
     CORSMiddleware,
@@ -72,70 +74,80 @@ class AssistantRequest(BaseModel):
 
 @app.post("/assistant")
 def assistant_endpoint(request: AssistantRequest):
-    intent = ai_service.detect_intent(request.message)
+    user_id_str = str(request.user_id)
+    if user_id_str not in sessions:
+        sessions[user_id_str] = {"history": [], "topic": "general"}
+        
+    session = sessions[user_id_str]
+    history = session.setdefault("history", [])
+    previous_topic = session.setdefault("topic", "general")
+
     lang = request.language if request.language else "en"
     
-    # Internal text mappers
-    t_bal = {
-        "en": "Your account balance is \u20b9{}.",
-        "hi": "आपके खाते का बैलेंस \u20b9{} है।",
-        "mr": "तुमच्या खात्यावरील शिल्लक \u20b9{} आहे."
-    }
-    t_no_acc = {
-        "en": "I couldn't find your account details.",
-        "hi": "मुझे आपके खाते का विवरण नहीं मिला।",
-        "mr": "मला तुमचे खाते तपशील सापडले नाहीत."
-    }
-    t_no_txn = {
-        "en": "You have no recent transactions.",
-        "hi": "आपके पास कोई हालिया लेनदेन नहीं है।",
-        "mr": "तुमचे कोणतेही अलीकडील व्यवहार नाहीत."
-    }
-    t_txn = {
-        "en": "Your last transaction was a {} of \u20b9{} for '{}' on {}.",
-        "hi": "आपका अंतिम लेनदेन {} को '{}' के लिए \u20b9{} का {} था।",
-        "mr": "तुमचा शेवटचा व्यवहार {} रोजी '{}' साठी \u20b9{} चा {} होता." # Date, Desc, Amount, Type
-    }
-
-    # Static options mapper
-    opts = {
-        "balance": {"en": ["Show Transactions", "Main Menu"], "hi": ["लेनदेन दिखाएं", "मुख्य मेनू"], "mr": ["व्यवहार दाखवा", "मुख्य मेनू"]},
-        "try": {"en": ["Try Again", "Main Menu"], "hi": ["पुनः प्रयास करें", "मुख्य मेनू"], "mr": ["पुन्हा प्रयत्न करा", "मुख्य मेनू"]}
-    }
-
-    opt_bal = opts["balance"].get(lang, opts["balance"]["en"])
-    opt_try = opts["try"].get(lang, opts["try"]["en"])
-
-    if intent == "balance":
-        balance = banking_service.get_balance(request.user_id)
-        if balance is not None:
-            return {"reply": t_bal.get(lang, t_bal["en"]).format(balance), "options": opt_bal}
+    # Topic Tracking and Context Isolation
+    new_topic = ai_service.detect_topic(request.message)
+    
+    if new_topic != "general" and new_topic != previous_topic:
+        # Context reset because topic changed
+        history = []
+        session["topic"] = new_topic
+    elif new_topic == "general":
+        # Keep flowing if the user just responds generally within the current flow
+        new_topic = previous_topic
+        
+    # Retrieve User Banking Data
+    user = banking_service.get_user_by_id(request.user_id)
+    banking_data_str = "Banking Data: Not available."
+    if user:
+        if new_topic == "loan":
+            banking_data_str = (
+                "Current topic: loan\n"
+                "Available loan services: Home Loan, Personal Loan, Car Loan, Education Loan.\n"
+                "Do NOT include balance, transactions, or unrelated suggestions."
+            )
+        elif new_topic == "card_services":
+            banking_data_str = (
+                "Current topic: card_services\n"
+                "Available card services: Block Card, Replace Card, Check Card Limit, Card Activation.\n"
+                "Do NOT include balance, transactions, or unrelated suggestions."
+            )
         else:
-            return {"reply": t_no_acc.get(lang, t_no_acc["en"]), "options": opt_try}
+            balance = user.get("account", {}).get("balance", "Unknown")
+            transactions = user.get("transactions", [])
+            banking_data_str = f"User Banking Data:\n- Balance: \u20b9{balance}\n- Transactions: {transactions}"
             
-    elif intent == "transactions":
-        transactions = banking_service.get_transactions(request.user_id)
-        if transactions is not None:
-            if not transactions:
-                return {"reply": t_no_txn.get(lang, t_no_txn["en"]), "options": opt_bal}
-            latest = transactions[-1]
-            typ = latest.get('type', 'transaction')
-            amt = latest.get('amount', 0)
-            desc = latest.get('description', 'Unknown')
-            dt = latest.get('date', '')
+            # Include suggestions in prompt context if applicable
+            suggestion = ai_service.generate_suggestions(user)
+            if suggestion:
+                banking_data_str += f"\n\nSystem Notice: Provide these financial suggestions and options: {suggestion['reply']} | Options: {suggestion['options']}"
             
-            if lang == "en":
-                reply = t_txn["en"].format(typ, amt, desc, dt)
-            elif lang == "hi":
-                reply = t_txn["hi"].format(dt, desc, amt, typ)
-            else:
-                reply = t_txn["mr"].format(dt, desc, amt, typ)
-                
-            return {"reply": reply, "options": opt_bal}
-        else:
-            return {"reply": t_no_acc.get(lang, t_no_acc["en"]), "options": opt_bal}
-            
-    else:
-        # intents: loan, loan_help, card, unknown
-        reply_data = ai_service.ask_gemini(request.message, language=lang)
-        return reply_data
+    # Append the latest user message
+    history.append({"role": "User", "content": request.message})
+    history = history[-10:] # Keep last 10 messages for memory limits
+    
+    # Construct complete prompt
+    conv_history_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history])
+    
+    prompt = (
+        f"{banking_data_str}\n\n"
+        f"Conversation History:\n{conv_history_str}\n\n"
+        f"Based on the conversation history and banking data, generate the next response. "
+        f"If the user asks for their balance or transactions, use the data provided above. Include all suggested options."
+    )
+    
+    # Always call Gemini to generate the structured response
+    response_data = ai_service.ask_gemini(prompt, language="en", topic=new_topic)
+    
+    if "error" in response_data:
+        return response_data
+    
+    # Append assistant's response to history
+    history.append({"role": "ARIA", "content": response_data.get("reply", "")})
+    session["history"] = history
+    sessions[user_id_str] = session
+    
+    # Translate automatically if needed
+    if lang != "en":
+        response_data = ai_service.translate_response(response_data, lang)
+        
+    return response_data

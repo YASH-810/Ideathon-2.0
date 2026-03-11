@@ -13,6 +13,14 @@ export default function AssistantPage() {
   const [user, setUser] = useState({ user_id: 1, name: "Guest" });
   const [language, setLanguage] = useState("en");
   const [speechEnabled, setSpeechEnabled] = useState(true);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
 
   // Text-To-Speech implementation
   const speakText = (textToSpeak, langCode) => {
@@ -57,13 +65,24 @@ export default function AssistantPage() {
         })
       });
       const data = await response.json();
+      
+      if (data.error) {
+        showToast(data.error);
+        setMessages((prev) => [...prev, { sender: "ARIA", text: data.error, options: [] }]);
+        speakText(data.error, language);
+        return;
+      }
+      
       const replyData = data.reply;
       
       setMessages((prev) => [...prev, { sender: "ARIA", text: replyData, options: data.options }]);
       speakText(replyData, language);
     } catch (error) {
       console.error("Error connecting to AI:", error);
-      setMessages((prev) => [...prev, { sender: "ARIA", text: "I'm having trouble connecting to the bank right now. Please try again later.", options: ["Check Balance", "Main Menu"] }]);
+      const fallbackMsg = "AI service temporarily unavailable. Please try again.";
+      showToast(fallbackMsg);
+      setMessages((prev) => [...prev, { sender: "ARIA", text: fallbackMsg, options: ["Check Balance", "Main Menu"] }]);
+      speakText(fallbackMsg, language);
     }
   };
 
@@ -80,6 +99,13 @@ export default function AssistantPage() {
   return (
     <main className="flex flex-col h-screen w-full bg-gradient-to-b from-blue-50 to-blue-100">
       
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-24 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-xl z-50 animate-fade-in font-medium max-w-sm border border-red-600">
+          {toast}
+        </div>
+      )}
+
       {/* Fixed top header */}
       <AssistantHeader 
         userName={user.name} 
